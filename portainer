@@ -1,0 +1,258 @@
+#!/bin/bash
+#==============================================================================
+#  OK Inteligencia Artificial
+#  Formacao ISP AI Starter - Provedores Inteligentes
+#==============================================================================
+#
+#  Script:   03-portainer.sh
+#  Funcao:   Deploy do Portainer + criacao de admin
+#  Versao:   3.2.0
+#
+#  COMO EXECUTAR:
+#    1. Acesse o servidor via SSH: ssh root@IP_DO_SERVIDOR
+#    2. Copie todo o conteudo deste script
+#    3. Cole no terminal e pressione Enter
+#
+#  PRE-REQUISITOS:
+#    - Docker e Swarm configurados (01-docker.sh)
+#    - Traefik deployado (02-traefik.sh)
+#
+#==============================================================================
+set -e
+[ "$EUID" -ne 0 ] && { echo "Execute como root: sudo bash $0"; exit 1; }
+#==============================================================================
+# FUNCOES
+#==============================================================================
+log_info()    { echo "[INFO]  $1"; }
+log_success() { echo "[OK]    $1"; }
+log_warn()    { echo "[AVISO] $1"; }
+log_error()   { echo "[ERRO]  $1"; }
+wait_for() {
+    local description=$1 check_cmd=$2 timeout=${3:-120} interval=${4:-3} elapsed=0
+    log_info "Aguardando: $description (timeout: ${timeout}s)"
+    while [ $elapsed -lt $timeout ]; do
+        if eval "$check_cmd" > /dev/null 2>&1; then
+            log_success "$description"
+            return 0
+        fi
+        sleep $interval
+        elapsed=$((elapsed + interval))
+        echo -n "."
+    done
+    echo
+    log_error "Timeout aguardando: $description"
+    return 1
+}
+#==============================================================================
+# ETAPA 1: VERIFICACOES
+#==============================================================================
+echo
+echo "=============================================================================="
+echo "  ETAPA 1/4: Verificacoes"
+echo "=============================================================================="
+echo
+docker info > /dev/null 2>&1 || { log_error "Docker nao esta rodando"; exit 1; }
+log_success "Docker OK"
+docker info 2>/dev/null | grep -q "Swarm: active" || { log_error "Docker Swarm nao ativo"; exit 1; }
+log_success "Swarm OK"
+docker network ls | grep -q "network_public" || { log_error "Rede network_public nao existe"; exit 1; }
+log_success "Rede OK"
+command -v curl &>/dev/null || { apt-get update -qq && apt-get install -y -qq curl; }
+command -v jq &>/dev/null || { apt-get update -qq && apt-get install -y -qq jq; }
+log_success "Dependencias OK"
+#==============================================================================
+# ETAPA 2: CONFIGURACOES
+#==============================================================================
+echo
+echo "=============================================================================="
+echo "  ETAPA 2/4: Configuracoes"
+echo "=============================================================================="
+echo
+DOMAIN=$(hostname -f)
+SERVER_IP=$(hostname -I | awk '{print $1}')
+PORTAINER_USER="br10consultoria"
+PORTAINER_PASS="B3ni0808@#$%!"
+log_success "DOMAIN: port.br10ia.ia.br"
+log_success "SERVER_IP: $SERVER_IP"
+log_success "Usuario: $PORTAINER_USER"
+log_success "Senha: $PORTAINER_PASS"
+#==============================================================================
+# ETAPA 3: DEPLOY PORTAINER
+#==============================================================================
+echo
+echo "=============================================================================="
+echo "  ETAPA 3/4: Deploy do Portainer"
+echo "=============================================================================="
+echo
+mkdir -p /storage/portainer/{data,logs,config}
+# Limpa instalacao anterior se existir
+if [ -f "/storage/portainer/data/portainer.db" ]; then
+    log_warn "Instalacao anterior detectada"
+    echo -n "Limpar e reinstalar? (s/N): "
+    read -r LIMPAR
+    if [[ "$LIMPAR" =~ ^[Ss]$ ]]; then
+        rm -rf /storage/portainer/data/*
+        log_success "Dados limpos"
+    fi
+fi
+# Remove stack anterior
+if docker stack ls | grep -q "portainer"; then
+    log_info "Removendo stack anterior..."
+    docker stack rm portainer
+    wait_for "Stack removida" "! docker stack ls | grep -q portainer" 60 2
+    sleep 5
+fi
+# Cria YAML
+cat > /storage/portainer/config/portainer.yaml << YAML
+services:
+  portainer:
+    image: portainer/portainer-ce:lts
+    hostname: portainer.intranet.br
+    environment:
+      - TZ=America/Sao_Paulo
+    ports:
+      - 9000:9000
+      - 9443:9443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /storage/portainer/data:/data
+    networks:
+      - network_public
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 512M
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=network_public
+        - traefik.http.routers.portainer.rule=Host(\`pn.${DOMAIN}\`)
+        - traefik.http.routers.portainer.entrypoints=websecure
+        - traefik.http.routers.portainer.tls.certresolver=letsencrypt
+        - traefik.http.services.portainer.loadbalancer.server.port=9000
+networks:
+  network_public:
+    external: true
+YAML
+log_success "YAML criado"
+# Deploy
+log_info "Executando deploy..."
+docker stack deploy -c /storage/portainer/config/portainer.yaml portainer
+wait_for "Stack criada" "docker stack ls | grep -q portainer" 30 2
+wait_for "Servico running" "docker service ls | grep portainer_portainer | grep -q '1/1'" 120 3
+log_success "Portainer deployado"
+#==============================================================================
+# ETAPA 4: CRIAR ADMIN
+#==============================================================================
+echo
+echo "=============================================================================="
+echo "  ETAPA 4/4: Criando Usuario Admin"
+echo "=============================================================================="
+echo
+PORTAINER_URL="https://127.0.0.1:9443"
+# Aguarda API
+wait_for "API disponivel" "curl -sk ${PORTAINER_URL}/api/status | grep -q Version" 180 3
+# Aguarda inicializacao completa (45s para garantir banco pronto)
+log_info "Aguardando inicializacao completa (45s)..."
+sleep 45
+# Funcao para verificar se admin existe usando codigo HTTP
+check_admin_exists() {
+    local http_code
+    http_code=$(curl -sk -o /dev/null -w "%{http_code}" "${PORTAINER_URL}/api/users/admin/check")
+    # 204 = admin existe, 404 = nao existe
+    [ "$http_code" = "204" ]
+}
+# Funcao para criar admin
+create_admin() {
+    local http_code body
+    # Captura codigo HTTP e corpo da resposta separadamente
+    body=$(curl -sk -w "\n%{http_code}" -X POST "${PORTAINER_URL}/api/users/admin/init" \
+        -H "Content-Type: application/json" \
+        -d "{\"Username\":\"${PORTAINER_USER}\",\"Password\":\"${PORTAINER_PASS}\"}")
+    http_code=$(echo "$body" | tail -1)
+    body=$(echo "$body" | sed '$d')
+    
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        echo "SUCESSO"
+        return 0
+    elif [ "$http_code" = "409" ]; then
+        echo "JA_EXISTE"
+        return 0
+    else
+        echo "$body"
+        return 1
+    fi
+}
+# Verifica se admin ja existe
+log_info "Verificando se admin ja existe..."
+if check_admin_exists; then
+    log_info "Usuario admin ja existe"
+else
+    log_info "Nenhum admin encontrado. Criando usuario admin..."
+    
+    ADMIN_CRIADO=false
+    for i in 1 2 3 4 5; do
+        log_info "Tentativa $i/5..."
+        
+        RESULTADO=$(create_admin)
+        
+        if [ "$RESULTADO" = "SUCESSO" ]; then
+            log_success "Usuario admin criado com sucesso!"
+            ADMIN_CRIADO=true
+            break
+        elif [ "$RESULTADO" = "JA_EXISTE" ]; then
+            log_info "Usuario admin ja foi criado (possivelmente por outra instancia)"
+            ADMIN_CRIADO=true
+            break
+        else
+            MSG=$(echo "$RESULTADO" | jq -r '.message // .details // "erro desconhecido"' 2>/dev/null || echo "$RESULTADO")
+            log_warn "Tentativa $i falhou: $MSG"
+            
+            # Verifica novamente se admin foi criado entre as tentativas
+            if check_admin_exists; then
+                log_info "Admin foi criado durante o processo"
+                ADMIN_CRIADO=true
+                break
+            fi
+            
+            sleep 10
+        fi
+    done
+    
+    if [ "$ADMIN_CRIADO" = "false" ]; then
+        log_error "Falha ao criar usuario admin apos 5 tentativas"
+        log_warn "Tente criar manualmente acessando: https://${SERVER_IP}:9443"
+    fi
+fi
+# Verificacao final
+sleep 3
+if check_admin_exists; then
+    log_success "Verificacao final: Admin configurado corretamente"
+else
+    log_warn "Verificacao final: Admin pode nao estar configurado"
+fi
+#==============================================================================
+# CONCLUIDO
+#==============================================================================
+echo
+echo "=============================================================================="
+echo "  PORTAINER INSTALADO COM SUCESSO!"
+echo "=============================================================================="
+echo
+echo "  Acesse o Portainer:"
+echo
+echo "    Via IP:      https://${SERVER_IP}:9443"
+echo "    Via Dominio: https://pn.${DOMAIN}"
+echo
+echo "  Credenciais:"
+echo "    Usuario: ${PORTAINER_USER}"
+echo "    Senha:   ${PORTAINER_PASS}"
+echo
+echo "  NOTA: Se o login nao funcionar, acesse via browser"
+echo "        e crie o admin manualmente na primeira tela."
+echo
+echo "=============================================================================="
