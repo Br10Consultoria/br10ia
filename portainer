@@ -1,26 +1,5 @@
 #!/bin/bash
 #==============================================================================
-#  OK Inteligencia Artificial
-#  Formacao ISP AI Starter - Provedores Inteligentes
-#==============================================================================
-#
-#  Script:   03-portainer.sh
-#  Funcao:   Deploy do Portainer + criacao de admin
-#  Versao:   3.2.0
-#
-#  COMO EXECUTAR:
-#    1. Acesse o servidor via SSH: ssh root@IP_DO_SERVIDOR
-#    2. Copie todo o conteudo deste script
-#    3. Cole no terminal e pressione Enter
-#
-#  PRE-REQUISITOS:
-#    - Docker e Swarm configurados (01-docker.sh)
-#    - Traefik deployado (02-traefik.sh)
-#
-#==============================================================================
-set -e
-[ "$EUID" -ne 0 ] && { echo "Execute como root: sudo bash $0"; exit 1; }
-#==============================================================================
 # FUNCOES
 #==============================================================================
 log_info()    { echo "[INFO]  $1"; }
