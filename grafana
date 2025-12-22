@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  grafana:
+    image: grafana/grafana:latest
+    hostname: "{{.Service.Name}}.{{.Task.Slot}}"
+
+    environment:
+      - TZ=America/Bahia
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_SERVER_ROOT_URL=https://grafana.ismtelecom.com.br
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+    networks:
+      - network_public
+
+    deploy:
+      mode: replicated
+      replicas: 1
+
+      placement:
+        constraints:
+          - node.role == manager
+
+      restart_policy:
+        condition: any
+
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=network_public
+
+        # ================= HTTP (porta 80) =================
+        - traefik.http.routers.grafana-http.rule=Host(`grafana.ismtelecom.com.br`)
+        - traefik.http.routers.grafana-http.entrypoints=web
+
+        # ================= HTTPS (porta 443) =================
+        - traefik.http.routers.grafana-https.rule=Host(`grafana.ismtelecom.com.br`)
+        - traefik.http.routers.grafana-https.entrypoints=websecure
+        - traefik.http.routers.grafana-https.tls=true
+        - traefik.http.routers.grafana-https.tls.certresolver=letsencrypt
+
+        # ================= Service =================
+        - traefik.http.services.grafana.loadbalancer.server.port=3000
+
+volumes:
+  grafana_data:
+
+networks:
+  network_public:
+    external: true
