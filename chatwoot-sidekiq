@@ -1,0 +1,89 @@
+services:
+  chatwoot-sidekiq:
+    image: chatwoot/chatwoot:v4.8.0
+    hostname: "{{.Service.Name}}.{{.Task.Slot}}"
+
+    command: bundle exec sidekiq -C config/sidekiq.yml
+
+    entrypoint: docker/entrypoints/rails.sh
+
+    volumes:
+      - /storage/chatwoot/data:/app/storage
+
+    networks:
+      - network_public
+
+    environment:
+      # Configurações Gerais
+      - TZ=America/Sao_Paulo
+      - INSTALLATION_NAME=chatwoot
+      - NODE_ENV=production
+      - RAILS_ENV=production
+      - INSTALLATION_ENV=docker
+      - FRONTEND_URL=https://chat.ismtelecom.com.br
+      - DEFAULT_LOCALE=pt_BR
+      - FORCE_SSL=true
+      - RAILS_LOG_TO_STDOUT=true
+
+      # Segurança (DEVE ser igual ao admin!)
+      - SECRET_KEY_BASE=9e8309bd22c50178c7b62640cf62a56b
+
+      # Redis
+      - REDIS_URL=redis://redis:6379/3
+
+      # PostgreSQL
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USERNAME=postgres
+      - POSTGRES_PASSWORD=kakaroto@2025
+      - POSTGRES_DATABASE=chatwoot
+
+      # Email (SMTP)
+      - MAILER_SENDER_EMAIL=noreply@seudominio.com.br
+      - SMTP_ADDRESS=smtp.seudominio.com.br
+      - SMTP_PORT=587
+      - SMTP_AUTHENTICATION=plain
+      - SMTP_DOMAIN=seudominio.com.br
+      - SMTP_ENABLE_STARTTLS_AUTO=true
+      - SMTP_USERNAME=usuario@seudominio.com.br
+      - SMTP_PASSWORD=sua_senha_smtp
+      - SMTP_OPENSSL_VERIFY_MODE=none
+
+      # Object Storage (S3/Minio)
+      - ACTIVE_STORAGE_SERVICE=local
+      # - ACTIVE_STORAGE_SERVICE=s3_compatible
+      # - STORAGE_BUCKET_NAME=chatwoot
+      # - STORAGE_ACCESS_KEY_ID=sua_access_key
+      # - STORAGE_SECRET_ACCESS_KEY=sua_secret_key
+      # - STORAGE_REGION=us-east-1
+      # - STORAGE_ENDPOINT=https://s3.${DOMAIN}
+      # - STORAGE_FORCE_PATH_STYLE=true
+
+      # Performance
+      - SIDEKIQ_CONCURRENCY=5
+      - RAILS_MAX_THREADS=5
+
+      # Funcionalidades
+      - USE_INBOX_AVATAR_FOR_BOT=true
+      - ENABLE_PUSH_RELAY_SERVER=true
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2048M
+        reservations:
+          cpus: "0.5"
+          memory: 1024M
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 0
+      update_config:
+        parallelism: 1
+        delay: 10s
+
+networks:
+  network_public:
+    external: true
