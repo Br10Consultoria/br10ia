@@ -1,0 +1,87 @@
+criar o diretorio via cli 
+
+mkdir -p /opt/stacks/prometheus
+cd /opt/stacks/prometheus
+
+depois via portainer ir em config e criar o arquivo como abaixo
+
+nome da configuracao: 
+prometheus_config
+
+conteudo da configuracao:
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+depois ri em stacks e subir a stacks com o conteudo abaixo:
+
+version: "3.9"
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    hostname: "{{.Service.Name}}.{{.Task.Slot}}"
+
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+    environment:
+      - TZ=America/Bahia
+
+    volumes:
+      - prometheus_data:/prometheus
+
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+
+    networks:
+      - network_public
+
+    deploy:
+      mode: replicated
+      replicas: 1
+
+      placement:
+        constraints:
+          - node.role == manager
+
+      restart_policy:
+        condition: any
+
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=network_public
+
+        # HTTP
+        - traefik.http.routers.prometheus-http.rule=Host(`prometheus.ismtelecom.com.br`)
+        - traefik.http.routers.prometheus-http.entrypoints=web
+
+        # HTTPS
+        - traefik.http.routers.prometheus-https.rule=Host(`prometheus.ismtelecom.com.br`)
+        - traefik.http.routers.prometheus-https.entrypoints=websecure
+        - traefik.http.routers.prometheus-https.tls=true
+        - traefik.http.routers.prometheus-https.tls.certresolver=letsencrypt
+
+        # Service
+        - traefik.http.services.prometheus.loadbalancer.server.port=9090
+
+volumes:
+  prometheus_data:
+
+configs:
+  prometheus_config:
+    external: true
+
+networks:
+  network_public:
+    external: true
+
