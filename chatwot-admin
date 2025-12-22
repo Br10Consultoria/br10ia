@@ -1,0 +1,120 @@
+services:
+  chatwoot-admin:
+    image: chatwoot/chatwoot:v4.8.0
+    hostname: "{{.Service.Name}}.{{.Task.Slot}}"
+
+    # Prepara o banco (create + migrate + seed) e inicia o servidor web
+    command: >
+      sh -c "bundle exec rails db:chatwoot_prepare &&
+             bundle exec rails s -p 3000 -b 0.0.0.0"
+
+    entrypoint: docker/entrypoints/rails.sh
+
+    volumes:
+      - /storage/chatwoot/data:/app/storage
+
+    networks:
+      - network_public
+
+    environment:
+      # Configurações Gerais
+      - TZ=America/Sao_Paulo
+      - INSTALLATION_NAME=chatwoot
+      - NODE_ENV=production
+      - RAILS_ENV=production
+      - INSTALLATION_ENV=docker
+      - FRONTEND_URL=https://chat.ismtelecom.com.br
+      - DEFAULT_LOCALE=pt_BR
+      - FORCE_SSL=true
+      - RAILS_LOG_TO_STDOUT=true
+
+      # Segurança (gere uma nova: openssl rand -hex 64)
+      - SECRET_KEY_BASE=9e8309bd22c50178c7b62640cf62a56b
+      - ENABLE_ACCOUNT_SIGNUP=false
+
+      # Redis
+      - REDIS_URL=redis://redis:6379/3
+
+      # PostgreSQL
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USERNAME=postgres
+      - POSTGRES_PASSWORD=Admin@Starter2025
+      - POSTGRES_DATABASE=chatwoot
+
+      # Email (SMTP)
+      - MAILER_SENDER_EMAIL=noreply@seudominio.com.br
+      - SMTP_ADDRESS=smtp.seudominio.com.br
+      - SMTP_PORT=587
+      - SMTP_AUTHENTICATION=plain
+      - SMTP_ismtelecom.com.br=seudominio.com.br
+      - SMTP_ENABLE_STARTTLS_AUTO=true
+      - SMTP_USERNAME=usuario@seudominio.com.br
+      - SMTP_PASSWORD=sua_senha_smtp
+      - SMTP_OPENSSL_VERIFY_MODE=none
+
+      # Object Storage (S3/Minio)
+      - ACTIVE_STORAGE_SERVICE=local
+      # - ACTIVE_STORAGE_SERVICE=s3_compatible
+      # - STORAGE_BUCKET_NAME=chatwoot
+      # - STORAGE_ACCESS_KEY_ID=sua_access_key
+      # - STORAGE_SECRET_ACCESS_KEY=sua_secret_key
+      # - STORAGE_REGION=us-east-1
+      # - STORAGE_ENDPOINT=https://s3.ismtelecom.com.br
+      # - STORAGE_FORCE_PATH_STYLE=true
+
+      # Performance
+      - WEB_CONCURRENCY=0
+      - RAILS_MAX_THREADS=5
+      - SIDEKIQ_CONCURRENCY=5
+      - RACK_TIMEOUT_SERVICE_TIMEOUT=30
+
+      # Funcionalidades
+      - USE_INBOX_AVATAR_FOR_BOT=true
+      - ENABLE_PUSH_RELAY_SERVER=true
+      - ENABLE_RACK_ATTACK=false
+
+      # Google OAuth SSO (Opcional)
+      # - GOOGLE_OAUTH_CLIENT_ID=seu_client_id.apps.googleusercontent.com
+      # - GOOGLE_OAUTH_CLIENT_SECRET=seu_client_secret
+      # - GOOGLE_OAUTH_CALLBACK_URL=https://chat.${ismtelecom.com.br}/omniauth/google_oauth2/callback
+
+    #healthcheck:
+    #  test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
+    #  interval: 90s
+    #  timeout: 90s
+    #  retries: 10
+    #  start_period: 600s
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2048M
+        reservations:
+          cpus: "0.5"
+          memory: 1024M
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 0
+      update_config:
+        parallelism: 1
+        delay: 10s
+      labels:
+        - traefik.enable=true
+        - traefik.swarm.network=network_public
+        - traefik.http.routers.chatwoot-admin.rule=Host(`chat.${ismtelecom.com.br}`)
+        - traefik.http.routers.chatwoot-admin.entrypoints=websecure
+        - traefik.http.routers.chatwoot-admin.tls.certresolver=letsencrypt
+        - traefik.http.routers.chatwoot-admin.service=chatwoot-admin
+        - traefik.http.services.chatwoot-admin.loadbalancer.server.port=3000
+        - traefik.http.services.chatwoot-admin.loadbalancer.passhostheader=true
+        # Middleware SSL para Websockets
+        - traefik.http.middlewares.chatwoot-sslheader.headers.customrequestheaders.X-Forwarded-Proto=https
+        - traefik.http.routers.chatwoot-admin.middlewares=chatwoot-sslheader@swarm
+
+networks:
+  network_public:
+    external: true
