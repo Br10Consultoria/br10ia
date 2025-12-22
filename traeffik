@@ -1,29 +1,14 @@
 #!/bin/bash
-#==============================================================================
-#  OK Inteligencia Artificial
-#  Formacao ISP AI Starter - Provedores Inteligentes
-#==============================================================================
-#
-#  Script:   02-traefik.sh
-#  Funcao:   Deploy do Traefik (Reverse Proxy + SSL)
-#  Versao:   1.0.0
-#
-#  COMO EXECUTAR:
-#    1. Acesse o servidor via SSH: ssh root@IP_DO_SERVIDOR
-#    2. Copie todo o conteudo deste script
-#    3. Cole no terminal e pressione Enter
-#
-#  PRE-REQUISITOS:
-#    - Docker e Swarm configurados (01-docker.sh)
-#
-#==============================================================================
 EMAIL="miralvosoaresjunior@gmail.com"
+
 # Estrutura de diretórios
 mkdir -p /storage/traefik/{data,logs,config}
 touch /storage/traefik/data/acme.json
 chmod 600 /storage/traefik/data/acme.json
+
 # Remove stack existente
 docker stack rm traefik 2>/dev/null; sleep 3
+
 # Stack YAML
 cat > /tmp/traefik.yaml << YAML
 services:
@@ -74,12 +59,15 @@ services:
         condition: on-failure
         delay: 5s
         max_attempts: 3
+
 networks:
   network_public:
     external: true
 YAML
+
 # Deploy
 docker stack deploy -c /tmp/traefik.yaml traefik
+
 echo
 echo "=============================================================================="
 echo "  Traefik - OK Inteligencia Artificial"
@@ -100,3 +88,4 @@ echo
 echo "  Execute: bash 03-portainer.sh"
 echo
 echo "=============================================================================="
+
