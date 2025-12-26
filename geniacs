@@ -1,0 +1,131 @@
+#══════════════════════════════════════════════════════════════════════════════
+#  OK Inteligência Artificial
+#  Formação ISP AI Starter - Provedores Inteligentes
+#══════════════════════════════════════════════════════════════════════════════
+#
+#  Stack:       GenieACS (TR-069 ACS)
+#  Versão:      1.0.0
+#  Atualizado:  2025-12-24
+#
+#  Comunidade:  https://comunidade.okinteligenciaartificial.com.br
+#  Instagram:   @OKInteligenciaArtificial
+#  Suporte:     treinamentos@okinteligenciaartificial.com.br
+#  WhatsApp:    +55 31 98974-6556
+#  Instrutor:   Rafael Pereira
+#
+#  URLS:
+#    - UI (Admin):    https://gn.${DOMAIN}/
+#    - TR-069/CWMP:   http://IP_DO_SERVIDOR:7547
+#    - NBI API:       http://IP_DO_SERVIDOR:7557
+#    - File Server:   http://IP_DO_SERVIDOR:7567
+#
+#  CREDENCIAIS:
+#    - Usuário: admin
+#    - Senha:   Admin@Starter2025
+#
+#  DEPENDÊNCIAS: traefik
+#
+#  PASSO A PASSO:
+#    1. Criar diretórios (terminal SSH):
+#       mkdir -p /storage/genieacs/{mongodb,data,logs} && chown -R 999:999 /storage/genieacs/mongodb && chown -R 1000:1000 /storage/genieacs/{data,logs}
+#    2. Substituir ${DOMAIN} pelo seu domínio (CTRL+F): ex: aluno001.starter.ispai.com.br
+#    3. Fazer deploy no Portainer
+#
+#  PÓS-DEPLOY:
+#    1. Acessar a UI Admin:
+#       https://gn.${DOMAIN}/
+#
+#    2. Configurar os CPEs (roteadores/ONTs):
+#       - ACS URL:      http://IP_DO_SERVIDOR:7547
+#       - ACS Username: admin
+#       - ACS Password: Admin@Starter2025
+#
+#  DEPLOY:      Portainer Swarm
+#
+#══════════════════════════════════════════════════════════════════════════════
+services:
+  genieacs-mongodb:
+    image: mongo:4.4.18
+    hostname: "{{.Service.Name}}.{{.Task.Slot}}"
+    environment:
+      - TZ=America/Sao_Paulo
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=Admin@Starter2025
+    volumes:
+      - /storage/genieacs/mongodb:/data/db
+    networks:
+      - network_public
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+  genieacs:
+    image: drumsergio/genieacs:latest
+    hostname: "{{.Service.Name}}.{{.Task.Slot}}"
+    ports:
+      - "7547:7547"
+      - "7557:7557"
+      - "7567:7567"
+    environment:
+      - TZ=America/Sao_Paulo
+      - GENIEACS_MONGODB_CONNECTION_URL=mongodb://admin:Admin@Starter2025@genieacs-mongodb:27017/genieacs?authSource=admin
+      - GENIEACS_UI_JWT_SECRET=Admin@Starter2025
+      - GENIEACS_FS_HOSTNAME=gn.${DOMAIN}
+      - CWMP_AUTHENTICATION=admin:Admin@Starter2025
+      - GENIEACS_CWMP_INTERFACE=0.0.0.0
+      - GENIEACS_NBI_INTERFACE=0.0.0.0
+      - GENIEACS_FS_INTERFACE=0.0.0.0
+      - GENIEACS_UI_INTERFACE=0.0.0.0
+    volumes:
+      - /storage/genieacs/data:/opt/genieacs
+      - /storage/genieacs/logs:/var/log/genieacs
+    networks:
+      - network_public
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=network_public
+        - traefik.http.routers.genieacs.rule=Host(`gn.${DOMAIN}`)
+        - traefik.http.routers.genieacs.entrypoints=websecure
+        - traefik.http.routers.genieacs.tls.certresolver=letsencrypt
+        - traefik.http.routers.genieacs.service=genieacs
+        - traefik.http.services.genieacs.loadbalancer.server.port=3000
+        - traefik.http.services.genieacs.loadbalancer.passhostheader=true
+networks:
+  network_public:
+    external: true
